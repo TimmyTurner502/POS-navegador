@@ -1,0 +1,8 @@
+{
+  "name": "Zenith Inventory & POS",
+  "description": "A comprehensive, real-time inventory management and Point of Sale (POS) application designed for small to medium-sized businesses. It features modules for inventory control, sales, customer and supplier management, expense tracking, detailed reporting, and user role administration.",
+  "requestFramePermissions": [
+    "camera",
+    "bluetooth"
+  ]
+}

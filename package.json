@@ -1,0 +1,26 @@
+{
+  "name": "zenith-inventory-&-pos",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react-dom": "^19.1.1",
+    "react": "^19.1.1",
+    "recharts": "^3.1.2",
+    "jspdf": "2.5.1",
+    "html2canvas": "1.4.1",
+    "@zxing/library": "0.20.0",
+    "react-hot-toast": "2.4.1",
+    "@tanstack/react-virtual": "3.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}
