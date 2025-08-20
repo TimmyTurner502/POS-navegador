@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { View } from '../../types';
-import { ChartPieIcon, ShoppingCartIcon, ArchiveBoxIcon, DocumentTextIcon, KycIcon, Cog6ToothIcon, UserGroupIcon, ChartBarSquareIcon, TruckIcon, ReceiptOutlineIcon, BookOpenIcon, XMarkIcon, ShoppingBagIcon } from '../Icons';
+import { ChartPieIcon, ShoppingCartIcon, ArchiveBoxIcon, DocumentTextIcon, KycIcon, Cog6ToothIcon, UserGroupIcon, ChartBarSquareIcon, TruckIcon, ReceiptOutlineIcon, BookOpenIcon, XMarkIcon, ShoppingBagIcon, KeyIcon } from '../Icons';
 import { AppContext } from '../../App';
 
 interface MobileMenuProps {
@@ -16,6 +16,7 @@ const MobileMenu: React.FC<MobileMenuProps> = ({ isOpen, setIsOpen, currentView,
     const allNavItems = [
         { view: View.DASHBOARD, icon: <ChartPieIcon className="w-6 h-6" />, label: 'Dashboard' },
         { view: View.POS, icon: <ShoppingCartIcon className="w-6 h-6" />, label: 'Punto de Venta' },
+        { view: View.CASH_DRAWER, icon: <KeyIcon className="w-6 h-6" />, label: 'Módulo de Caja' },
         { view: View.INVENTORY, icon: <ArchiveBoxIcon className="w-6 h-6" />, label: 'Inventario' },
         { view: View.SALES, icon: <DocumentTextIcon className="w-6 h-6" />, label: 'Ventas' },
         { view: View.PURCHASES, icon: <ShoppingBagIcon className="w-6 h-6" />, label: 'Compras' },
@@ -29,7 +30,8 @@ const MobileMenu: React.FC<MobileMenuProps> = ({ isOpen, setIsOpen, currentView,
     ];
     
     const userPermissions = context?.currentUserRole?.permissions || [];
-    const navItems = allNavItems.filter(item => userPermissions.includes(item.view));
+    const enabledModules = context?.settings.enabledModules || [];
+    const navItems = allNavItems.filter(item => userPermissions.includes(item.view) && enabledModules.includes(item.view));
 
     if (!isOpen) return null;
 

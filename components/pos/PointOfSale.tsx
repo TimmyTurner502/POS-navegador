@@ -1,3 +1,4 @@
+
 import React, { useState, useContext, useMemo, useEffect } from 'react';
 import { AppContext } from '../../App';
 import { Product, SaleItem, Customer, Sale } from '../../types';
@@ -6,6 +7,7 @@ import { ShoppingCartIcon, TrashIcon, UserPlusIcon, MagnifyingGlassIcon, CreditC
 import Receipt from './Receipt';
 import BarcodeScanner from '../common/BarcodeScanner';
 import { formatCurrency } from '../../utils/formatters';
+import toast from 'react-hot-toast';
 
 const CustomerFormModal: React.FC<{ onClose: () => void, onSave: (customer: Customer) => void }> = ({ onClose, onSave }) => {
     const [formData, setFormData] = useState<Omit<Customer, 'id' | 'creditLimit' | 'currentBalance' | 'paymentHistory'>>({ name: '', email: '', phone: '', address: '', nit: '', cui: '' });
@@ -103,7 +105,11 @@ const PointOfSale: React.FC = () => {
     const [lastSale, setLastSale] = useState<any>(null);
 
     if (!context) return null;
-    const { products, setProducts, sales, setSales, customers, setCustomers, logAction, settings, setSettings, currentUser } = context;
+    const { products, sales, setSales, customers, setCustomers, logAction, settings, setSettings, currentUser, activeCashDrawerSession, setActiveCashDrawerSession, inventoryStock, setInventoryStock, currentBranchId } = context;
+    
+    const getStock = (productId: string) => {
+        return inventoryStock.find(s => s.productId === productId && s.branchId === currentBranchId)?.stock || 0;
+    };
 
     useEffect(() => {
         // When the selected customer is no longer in the list (e.g. after a search), reset to default.
@@ -113,8 +119,8 @@ const PointOfSale: React.FC = () => {
     }, [customers, selectedCustomerId]);
     
     const filteredProducts = useMemo(() => {
-        return products.filter(p => (p.name.toLowerCase().includes(productSearchTerm.toLowerCase()) || p.sku.toLowerCase().includes(productSearchTerm.toLowerCase())) && p.stock > 0);
-    }, [products, productSearchTerm]);
+        return products.filter(p => (p.name.toLowerCase().includes(productSearchTerm.toLowerCase()) || p.sku.toLowerCase().includes(productSearchTerm.toLowerCase())) && getStock(p.id) > 0);
+    }, [products, productSearchTerm, inventoryStock, currentBranchId]);
     
     const filteredCustomers = useMemo(() => {
         return customers.filter(c =>
@@ -130,10 +136,10 @@ const PointOfSale: React.FC = () => {
         setCart(prevCart => {
             const existingItem = prevCart.find(item => item.productId === product.id);
             if (existingItem) {
-                if (product.stock > existingItem.quantity) {
+                if (getStock(product.id) > existingItem.quantity) {
                     return prevCart.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item);
                 }
-                alert("No hay más stock disponible para este producto.");
+                toast.error("No hay más stock disponible para este producto.");
                 return prevCart;
             } else {
                 return [...prevCart, { productId: product.id, name: product.name, quantity: 1, price: product.price, cost: product.cost }];
@@ -142,9 +148,9 @@ const PointOfSale: React.FC = () => {
     };
 
     const updateQuantity = (productId: string, quantity: number) => {
-        const product = products.find(p => p.id === productId);
-        if (product && quantity > product.stock) {
-            alert(`Stock máximo disponible: ${product.stock}`);
+        const stock = getStock(productId);
+        if (quantity > stock) {
+            toast.error(`Stock máximo disponible: ${stock}`);
             return;
         }
         setCart(cart.map(item => item.productId === productId ? { ...item, quantity } : item).filter(item => item.quantity > 0));
@@ -179,30 +185,47 @@ const PointOfSale: React.FC = () => {
     };
 
     const processCheckout = (paymentMethod: Sale['paymentMethod']) => {
+        if (paymentMethod === 'cash' && !activeCashDrawerSession) {
+            toast.error("No hay una sesión de caja activa. Por favor, abra la caja antes de registrar ventas en efectivo.");
+            setIsPaymentModalOpen(false);
+            return;
+        }
+        
         setIsPaymentModalOpen(false);
 
-        const newProducts = [...products];
-        for (const item of cart) {
-            const productIndex = newProducts.findIndex(p => p.id === item.productId);
-            if (productIndex !== -1) {
-                newProducts[productIndex].stock -= item.quantity;
+        // Safely update inventory stock
+        setInventoryStock(currentStock => {
+            const newStock = [...currentStock];
+            for (const item of cart) {
+                const stockIndex = newStock.findIndex(s => s.productId === item.productId && s.branchId === currentBranchId);
+                if (stockIndex !== -1) {
+                    newStock[stockIndex] = {
+                        ...newStock[stockIndex],
+                        stock: newStock[stockIndex].stock - item.quantity
+                    };
+                }
             }
-        }
-        setProducts(newProducts);
+            return newStock;
+        });
 
         const customer = customers.find(c => c.id === selectedCustomerId) || customers[0];
 
         if (paymentMethod === 'credit') {
-            const newCustomers = customers.map(c => 
+            setCustomers(prevCustomers => prevCustomers.map(c => 
                 c.id === customer.id ? { ...c, currentBalance: c.currentBalance + cartTotal } : c
-            );
-            setCustomers(newCustomers);
+            ));
+        }
+
+        if (paymentMethod === 'cash' && activeCashDrawerSession) {
+            setActiveCashDrawerSession(prev => {
+                if (!prev) return null;
+                return { ...prev, cashSales: prev.cashSales + cartTotal };
+            });
         }
         
         const saleId = settings.enableCorrelative
             ? `${settings.documentPrefix}${settings.correlativeNextNumber.toString().padStart(5, '0')}`
             : `${settings.documentPrefix}${Date.now()}`;
-
 
         const newSale: Sale = {
             id: saleId,
@@ -217,9 +240,10 @@ const PointOfSale: React.FC = () => {
             user: currentUser.name,
             paymentMethod: paymentMethod,
             comments: comments.trim(),
+            branchId: currentBranchId,
         };
 
-        setSales([...sales, newSale]);
+        setSales(prevSales => [...prevSales, newSale]);
         if (settings.enableCorrelative) {
             setSettings(prev => ({...prev, correlativeNextNumber: prev.correlativeNextNumber + 1}));
         }
@@ -234,12 +258,13 @@ const PointOfSale: React.FC = () => {
         
         setTimeout(() => {
             window.print();
+            setLastSale(null);
         }, 500);
     };
 
     const startCheckout = () => {
         if (cart.length === 0) {
-            alert("El carrito está vacío.");
+            toast.error("El carrito está vacío.");
             return;
         }
         setIsPaymentModalOpen(true);
@@ -250,7 +275,7 @@ const PointOfSale: React.FC = () => {
         if (scannedProduct) {
             addToCart(scannedProduct);
         } else {
-            alert(`Producto con SKU "${result}" no encontrado.`);
+            toast.error(`Producto con SKU "${result}" no encontrado.`);
         }
         setIsScannerOpen(false);
     }
@@ -259,7 +284,9 @@ const PointOfSale: React.FC = () => {
 
     return (
         <div className="flex flex-col lg:flex-row h-[calc(100vh-8rem)] gap-4">
-             {lastSale && <Receipt sale={lastSale} />}
+             <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
+                {lastSale && <Receipt sale={lastSale} />}
+             </div>
              {isPaymentModalOpen && <PaymentModal total={cartTotal} customer={selectedCustomer} onProcessPayment={processCheckout} onClose={() => setIsPaymentModalOpen(false)} />}
              {isScannerOpen && <BarcodeScanner onScan={handleScan} onClose={() => setIsScannerOpen(false)} />}
 
@@ -285,7 +312,7 @@ const PointOfSale: React.FC = () => {
                                 <img src={product.imageUrl || `https://picsum.photos/seed/${product.id}/200`} alt={product.name} className="w-full h-24 object-cover rounded-md mb-2" />
                                 <h4 className="font-semibold text-sm truncate">{product.name}</h4>
                                 <p className="text-primary-500 font-bold">{formatCurrency(product.price, settings)}</p>
-                                <p className="text-xs text-gray-500">Stock: {product.stock}</p>
+                                <p className="text-xs text-gray-500">Stock: {getStock(product.id)}</p>
                             </div>
                         ))}
                     </div>

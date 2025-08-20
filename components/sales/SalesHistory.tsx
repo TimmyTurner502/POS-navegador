@@ -1,6 +1,3 @@
-
-
-
 import React, { useContext, useState, useRef, useMemo } from 'react';
 import { AppContext } from '../../App';
 import { Sale } from '../../types';
@@ -76,29 +73,12 @@ const SaleDetailModal: React.FC<{ sale: Sale, onClose: () => void }> = ({ sale, 
 };
 
 const PrintPreviewModal: React.FC<{ sale: any, onClose: () => void }> = ({ sale, onClose }) => {
-    const printRef = useRef<HTMLDivElement>(null);
-    
     const handlePrint = () => {
-        const printContent = printRef.current?.querySelector('#print-section-clone');
-        if (!printContent) return;
-
-        const printWindow = window.open('', '_blank');
-        if (printWindow) {
-            printWindow.document.write('<html><head><title>Recibo</title>');
-            // Inline critical styles for printing
-            printWindow.document.write('<style>body { margin: 0; font-family: monospace; } table { width: 100%; border-collapse: collapse; } th, td { padding: 2px; } .text-center { text-align: center; } .text-right { text-align: right; } .text-left { text-align: left; } .font-bold { font-weight: bold; } .text-xs { font-size: 12px; } .text-sm { font-size: 14px; } .text-base { font-size: 16px; } .text-lg { font-size: 18px; } .my-2 { margin-top: 8px; margin-bottom: 8px; } .mt-4 { margin-top: 16px; } .mx-auto { margin-left: auto; margin-right: auto; } .h-16 { height: 64px; } .w-16 { width: 64px; } img { max-width: 100%; height: auto; }</style>');
-            printWindow.document.write('</head><body>');
-            printWindow.document.write(printContent.innerHTML);
-            printWindow.document.write('</body></html>');
-            printWindow.document.close();
-            printWindow.focus();
-            printWindow.print();
-            printWindow.close();
-        }
+        window.print();
     };
 
     const handleDownloadPdf = () => {
-        const input = printRef.current?.querySelector('#print-section-clone');
+        const input = document.getElementById('print-section');
         if (input) {
             html2canvas(input as HTMLElement, { scale: 2 }).then(canvas => {
                 const imgData = canvas.toDataURL('image/png');
@@ -117,11 +97,9 @@ const PrintPreviewModal: React.FC<{ sale: any, onClose: () => void }> = ({ sale,
         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-start z-50 pt-10 overflow-y-auto">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-xl">
                  <h2 className="text-2xl font-bold mb-4">Vista Previa</h2>
-                 <div className="border dark:border-gray-700 p-2 overflow-y-auto max-h-[60vh]" ref={printRef}>
-                    <div id="print-section-wrapper" className="bg-gray-200 p-4">
-                        <div id="print-section-clone">
-                         <Receipt sale={sale} />
-                        </div>
+                 <div className="border dark:border-gray-700 p-2 overflow-y-auto max-h-[60vh]">
+                    <div className="bg-gray-200 p-4">
+                        <Receipt sale={sale} />
                     </div>
                  </div>
                  <div className="mt-6 flex justify-end space-x-3">
@@ -159,10 +137,6 @@ const SalesHistory: React.FC = () => {
 
     return (
         <div className="container mx-auto">
-            <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
-              {saleToPrint && <Receipt sale={saleToPrint} />}
-            </div>
-            
             {saleToPrint && <PrintPreviewModal sale={saleToPrint} onClose={() => setSaleToPrint(null)} />}
 
             <h2 className="text-3xl font-bold mb-6 text-gray-800 dark:text-white">Historial de Ventas</h2>
@@ -197,6 +171,7 @@ const SalesHistory: React.FC = () => {
                                 <td className="px-6 py-4">{formatCurrency(sale.total, settings)}</td>
                                 <td className="px-6 py-4 text-right">
                                     <button onClick={() => setSelectedSale(sale)} className="text-blue-600 hover:text-blue-800 mr-2"><EyeIcon className="w-5 h-5" title="Ver Detalles"/></button>
+
                                     <button onClick={() => handleOpenPrintPreview(sale)} className="text-green-600 hover:text-green-800">
                                         <PrinterIcon className="w-5 h-5" title="Imprimir Recibo"/>
                                     </button>

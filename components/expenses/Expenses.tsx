@@ -1,13 +1,15 @@
+
 import React, { useState, useContext, useMemo } from 'react';
 import { AppContext } from '../../App';
 import { Expense, ExpenseCategory } from '../../types';
 import { PlusIcon, PencilIcon, TrashIcon, MagnifyingGlassIcon, EyeIcon } from '../Icons';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import ConfirmModal from '../common/ConfirmModal';
+import toast from 'react-hot-toast';
 
-const ExpenseFormModal: React.FC<{ expense: Partial<Expense> | null, onClose: () => void, onSave: (expense: Expense) => void }> = ({ expense, onClose, onSave }) => {
+const ExpenseFormModal: React.FC<{ expense: Partial<Expense> | null, onClose: () => void, onSave: (expense: Omit<Expense, 'id' | 'branchId'>) => void }> = ({ expense, onClose, onSave }) => {
     const context = useContext(AppContext);
-    const [formData, setFormData] = useState<Partial<Expense>>(expense || { 
+    const [formData, setFormData] = useState<Partial<Omit<Expense, 'id' | 'branchId'>>>(expense || { 
         description: '', 
         amount: 0, 
         categoryId: context?.expenseCategories[0]?.id || '', 
@@ -53,7 +55,7 @@ const ExpenseFormModal: React.FC<{ expense: Partial<Expense> | null, onClose: ()
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave({ ...formData, id: formData.id || Date.now().toString() } as Expense);
+        onSave(formData as Omit<Expense, 'id' | 'branchId'>);
         onClose();
     };
 
@@ -128,15 +130,19 @@ const Expenses: React.FC = () => {
     const [viewingImage, setViewingImage] = useState<string | null>(null);
 
     if (!context) return null;
-    const { expenses, setExpenses, expenseCategories, logAction, settings } = context;
+    const { expenses, setExpenses, expenseCategories, logAction, settings, currentBranchId } = context;
 
-    const handleSaveExpense = (expense: Expense) => {
+    const handleSaveExpense = (expenseData: Omit<Expense, 'id' | 'branchId'>) => {
         if (editingExpense?.id) {
-            setExpenses(expenses.map(e => e.id === expense.id ? expense : e));
-            logAction(`Gasto actualizado: ${expense.description}`, { type: 'expense', id: expense.id });
+            const updatedExpense = { ...expenseData, id: editingExpense.id, branchId: editingExpense.branchId || currentBranchId };
+            setExpenses(expenses.map(e => e.id === updatedExpense.id ? updatedExpense : e));
+            logAction(`Gasto actualizado: ${updatedExpense.description}`, { type: 'expense', id: updatedExpense.id });
+            toast.success("Gasto actualizado.");
         } else {
-            setExpenses(prev => [...prev, expense].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-            logAction(`Gasto creado: ${expense.description}`, { type: 'expense', id: expense.id });
+            const newExpense = { ...expenseData, id: Date.now().toString(), branchId: currentBranchId };
+            setExpenses(prev => [newExpense, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            logAction(`Gasto creado: ${newExpense.description}`, { type: 'expense', id: newExpense.id });
+            toast.success("Gasto creado.");
         }
     };
     
@@ -145,6 +151,7 @@ const Expenses: React.FC = () => {
         setExpenses(expenses.filter(e => e.id !== expenseToDelete.id));
         logAction(`Gasto eliminado: ${expenseToDelete.description}`, { type: 'expense', id: expenseToDelete.id });
         setExpenseToDelete(null);
+        toast.success("Gasto eliminado.");
     };
 
     const openModalForEdit = (expense: Expense) => {
@@ -163,10 +170,11 @@ const Expenses: React.FC = () => {
 
     const filteredExpenses = useMemo(() => {
         return expenses.filter(e =>
-            e.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            getCategoryName(e.categoryId).toLowerCase().includes(searchTerm.toLowerCase())
+            e.branchId === currentBranchId &&
+            (e.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            getCategoryName(e.categoryId).toLowerCase().includes(searchTerm.toLowerCase()))
         );
-    }, [expenses, searchTerm, expenseCategories]);
+    }, [expenses, searchTerm, expenseCategories, currentBranchId]);
 
     return (
         <div className="container mx-auto">
@@ -241,6 +249,11 @@ const Expenses: React.FC = () => {
                                 </td>
                             </tr>
                         ))}
+                         {filteredExpenses.length === 0 && (
+                            <tr>
+                                <td colSpan={7} className="text-center py-8 text-gray-500">No se encontraron gastos para esta sucursal.</td>
+                            </tr>
+                        )}
                     </tbody>
                 </table>
             </div>

@@ -1,19 +1,24 @@
 
-
-
-
 import React, { useState, useContext, useMemo, useRef } from 'react';
 import { AppContext } from '../../App';
-import { Product, Category } from '../../types';
+import { Product, Category, InventoryStock } from '../../types';
 import { PlusIcon, PencilIcon, TrashIcon, ExclamationTriangleIcon, CameraIcon, ArrowDownTrayIcon, ArrowUpTrayIcon } from '../Icons';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import BarcodeScanner from '../common/BarcodeScanner';
 import ConfirmModal from '../common/ConfirmModal';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import toast from 'react-hot-toast';
 
-
-export const ProductFormModal: React.FC<{ product: Partial<Product> | null, onClose: () => void, onSave: (product: Product) => void, categories: Category[], setCategories: React.Dispatch<React.SetStateAction<Category[]>> }> = ({ product, onClose, onSave, categories, setCategories }) => {
-    const [formData, setFormData] = useState<Partial<Product>>(product || { name: '', sku: '', stock: 0, lowStockAlert: 5, price: 0, cost: 0, categoryId: categories[0]?.id || '' });
+export const ProductFormModal: React.FC<{ product: Partial<Product> | null, onClose: () => void, onSave: (product: Product, stock: number) => void, categories: Category[], setCategories: React.Dispatch<React.SetStateAction<Category[]>> }> = ({ product, onClose, onSave, categories, setCategories }) => {
+    const context = useContext(AppContext);
+    const [formData, setFormData] = useState<Partial<Product>>(product || { name: '', sku: '', lowStockAlert: 5, price: 0, cost: 0, categoryId: categories[0]?.id || '' });
+    
+    const getStockForProduct = (productId: string | undefined) => {
+        if (!context || !productId) return 0;
+        return context.inventoryStock.find(s => s.productId === productId && s.branchId === context.currentBranchId)?.stock || 0;
+    }
+    
+    const [stock, setStock] = useState<number>(getStockForProduct(product?.id));
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [isAddingCategory, setIsAddingCategory] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState("");
@@ -45,7 +50,7 @@ export const ProductFormModal: React.FC<{ product: Partial<Product> | null, onCl
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave({ ...formData, id: formData.id || Date.now().toString() } as Product);
+        onSave({ ...formData, id: formData.id || Date.now().toString() } as Product, stock);
         onClose();
     };
     
@@ -92,8 +97,8 @@ export const ProductFormModal: React.FC<{ product: Partial<Product> | null, onCl
                             )}
                         </label>
                          <label className="block">
-                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Stock Actual</span>
-                            <input type="number" name="stock" value={formData.stock} onChange={handleChange} className="mt-1 p-2 border rounded dark:bg-gray-700 dark:border-gray-600 w-full" />
+                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Stock Actual (Esta Sucursal)</span>
+                            <input type="number" name="stock" value={stock} onChange={e => setStock(parseInt(e.target.value) || 0)} className="mt-1 p-2 border rounded dark:bg-gray-700 dark:border-gray-600 w-full" />
                         </label>
                          <label className="block">
                             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Alerta de Stock Bajo</span>
@@ -141,23 +146,51 @@ const Inventory: React.FC = () => {
 
 
     if (!context) return null;
-    const { products, setProducts, logAction, settings, productCategories, setProductCategories } = context;
+    const { products, setProducts, logAction, settings, productCategories, setProductCategories, inventoryStock, setInventoryStock, currentBranchId } = context;
+    
+    const getStock = (productId: string) => {
+        return inventoryStock.find(s => s.productId === productId && s.branchId === currentBranchId)?.stock || 0;
+    };
 
-    const handleSaveProduct = (product: Product) => {
-        if (editingProduct?.id) {
-            setProducts(products.map(p => p.id === product.id ? product : p));
-            logAction(`Producto actualizado: ${product.name}`, { type: 'product', id: product.id });
-        } else {
-            setProducts([...products, product]);
-            logAction(`Producto creado: ${product.name}`, { type: 'product', id: product.id });
-        }
+    const handleSaveProduct = (product: Product, stock: number) => {
+        const isNewProduct = !products.some(p => p.id === product.id);
+
+        setProducts(prevProducts => {
+            if (isNewProduct) {
+                return [...prevProducts, product];
+            } else {
+                return prevProducts.map(p => (p.id === product.id ? product : p));
+            }
+        });
+
+        setInventoryStock(prevInventory => {
+            const newInventory = [...prevInventory];
+            const stockIndex = newInventory.findIndex(
+                s => s.productId === product.id && s.branchId === currentBranchId
+            );
+
+            if (stockIndex > -1) {
+                newInventory[stockIndex] = { ...newInventory[stockIndex], stock };
+            } else {
+                newInventory.push({ productId: product.id, branchId: currentBranchId, stock });
+            }
+            return newInventory;
+        });
+
+        const action = isNewProduct ? 'creado' : 'actualizado';
+        logAction(`Producto ${action}: ${product.name}`, { type: 'product', id: product.id });
+        toast.success(`Producto ${action} con éxito.`);
     };
     
     const confirmDeleteProduct = () => {
         if (!productToDelete) return;
+        // Remove product globally
         setProducts(products.filter(p => p.id !== productToDelete.id));
+        // Remove all stock entries for this product across all branches
+        setInventoryStock(inventoryStock.filter(s => s.productId !== productToDelete.id));
         logAction(`Producto eliminado: ${productToDelete.name}`, { type: 'product', id: productToDelete.id });
         setProductToDelete(null);
+        toast.success("Producto eliminado.");
     };
 
     const openModalForEdit = (product: Product) => {
@@ -185,7 +218,7 @@ const Inventory: React.FC = () => {
     const rowVirtualizer = useVirtualizer({
         count: filteredProducts.length,
         getScrollElement: () => parentRef.current,
-        estimateSize: () => 68, // Estimate row height
+        estimateSize: () => 68,
         overscan: 5,
     });
     
@@ -204,15 +237,25 @@ const Inventory: React.FC = () => {
     }
     
     const exportData = (format: 'json' | 'csv') => {
+        const productsWithStock = products.map(p => ({
+            ...p,
+            stock: getStock(p.id) // Get stock for the current branch
+        }));
+
+        if(productsWithStock.length === 0) {
+            toast.error("No hay productos para exportar.");
+            return;
+        }
+
         let dataStr = '';
-        let fileName = `inventario_${new Date().toISOString()}`;
+        let fileName = `inventario_${currentBranchId}_${new Date().toISOString()}`;
 
         if (format === 'json') {
-            dataStr = JSON.stringify(products, null, 2);
+            dataStr = JSON.stringify(productsWithStock, null, 2);
             fileName += '.json';
         } else { // csv
-            const headers = Object.keys(products[0]).join(',');
-            const rows = products.map(p => Object.values(p).join(','));
+            const headers = Object.keys(productsWithStock[0]).join(',');
+            const rows = productsWithStock.map(p => Object.values(p).map(val => `"${String(val).replace(/"/g, '""')}"`).join(','));
             dataStr = [headers, ...rows].join('\n');
             fileName += '.csv';
         }
@@ -223,68 +266,81 @@ const Inventory: React.FC = () => {
         link.download = fileName;
         link.click();
         URL.revokeObjectURL(link.href);
-        logAction(`Inventario exportado a ${format.toUpperCase()}`);
+        logAction(`Inventario exportado a ${format.toUpperCase()} para la sucursal ${currentBranchId}`);
     };
 
     const handleFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file) return;
 
+        type ProductWithStock = Product & { stock: number };
+
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
                 const text = e.target?.result as string;
-                let importedProducts: Product[];
+                let importedData: ProductWithStock[];
 
                 if (file.name.endsWith('.json')) {
-                    importedProducts = JSON.parse(text);
+                    importedData = JSON.parse(text);
                 } else if (file.name.endsWith('.csv')) {
-                    const lines = text.split('\n').filter(line => line);
-                    const headers = lines[0].split(',').map(h => h.trim());
-                    importedProducts = lines.slice(1).map(line => {
-                        const values = line.split(',');
+                    const lines = text.split('\n').filter(line => line.trim());
+                    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+                    importedData = lines.slice(1).map(line => {
+                        const values = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/); // Handle commas inside quotes
                         return headers.reduce((obj, header, index) => {
-                            const value = values[index].trim();
-                            // Convert numeric fields from string
-                            if (['stock', 'lowStockAlert', 'price', 'cost'].includes(header)) {
-                                (obj as any)[header] = parseFloat(value);
+                            const value = (values[index] || '').trim().replace(/"/g, '');
+                            if (['lowStockAlert', 'price', 'cost', 'stock'].includes(header)) {
+                                (obj as any)[header] = parseFloat(value) || 0;
                             } else {
                                 (obj as any)[header] = value;
                             }
                             return obj;
-                        }, {} as Product);
+                        }, {} as ProductWithStock);
                     });
                 } else {
-                    alert("Formato de archivo no soportado.");
+                    toast.error("Formato de archivo no soportado. Use CSV o JSON.");
                     return;
                 }
                 
-                // Deduplicate based on SKU
                 const existingSkus = new Set(products.map(p => p.sku));
-                const newProducts = importedProducts.filter(p => p.sku && !existingSkus.has(p.sku));
+                const newProductsToCreate: Product[] = [];
+                const newStockEntries: InventoryStock[] = [];
+
+                importedData.forEach(p => {
+                    if (p.sku && !existingSkus.has(p.sku)) {
+                        const { stock, ...productData } = p;
+                        newProductsToCreate.push(productData);
+                        newStockEntries.push({
+                            productId: productData.id,
+                            branchId: currentBranchId,
+                            stock: stock || 0
+                        });
+                    }
+                });
                 
-                if (newProducts.length > 0) {
-                    setProducts(prev => [...prev, ...newProducts]);
-                    logAction(`${newProducts.length} productos importados. ${importedProducts.length - newProducts.length} duplicados omitidos.`);
-                    alert(`${newProducts.length} productos importados. ${importedProducts.length - newProducts.length} duplicados fueron omitidos.`);
+                if (newProductsToCreate.length > 0) {
+                    setProducts(prev => [...prev, ...newProductsToCreate]);
+                    setInventoryStock(prev => [...prev, ...newStockEntries]);
+                    logAction(`${newProductsToCreate.length} productos importados. ${importedData.length - newProductsToCreate.length} duplicados omitidos.`);
+                    toast.success(`${newProductsToCreate.length} productos importados. ${importedData.length - newProductsToCreate.length} duplicados fueron omitidos.`);
                 } else {
-                     alert("No se importaron productos nuevos. Todos los SKUs del archivo ya existen.");
+                     toast.error("No se importaron productos nuevos. Todos los SKUs del archivo ya existen.");
                 }
 
             } catch (error) {
                 console.error("Error al importar archivo:", error);
-                alert("Hubo un error al procesar el archivo.");
+                toast.error("Hubo un error al procesar el archivo.");
             } finally {
-                 // Reset file input to allow re-uploading the same file
-                if(fileInputRef.current) fileInputRef.current.value = "";
+                 if(fileInputRef.current) fileInputRef.current.value = "";
             }
         };
         reader.readAsText(file);
     };
     
     const downloadTemplate = () => {
-         const headers = "id,name,sku,stock,lowStockAlert,price,cost,categoryId,expiryDate,imageUrl";
-         const exampleRow = "temp-1,Producto Ejemplo,SKU-000,100,10,19.99,10,1,2025-12-31,http://example.com/image.png";
+         const headers = "id,name,sku,lowStockAlert,price,cost,categoryId,expiryDate,imageUrl,stock";
+         const exampleRow = "temp-1,Producto Ejemplo,SKU-000,10,19.99,10,1,2025-12-31,http://example.com/image.png,100";
          const csvContent = `${headers}\n${exampleRow}`;
          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
          const link = document.createElement("a");
@@ -301,7 +357,7 @@ const Inventory: React.FC = () => {
                 <ConfirmModal
                     isOpen={!!productToDelete}
                     title="Confirmar Eliminación"
-                    message={`¿Está seguro de que desea eliminar el producto "${productToDelete.name}"?`}
+                    message={`¿Está seguro de que desea eliminar el producto "${productToDelete.name}"? Esta acción eliminará el producto y todo su stock en TODAS las sucursales.`}
                     onConfirm={confirmDeleteProduct}
                     onCancel={() => setProductToDelete(null)}
                 />
@@ -350,7 +406,7 @@ const Inventory: React.FC = () => {
                             <th scope="col" className="px-6 py-3"></th>
                             <th scope="col" className="px-6 py-3">Nombre</th>
                             <th scope="col" className="px-6 py-3">SKU</th>
-                            <th scope="col" className="px-6 py-3">Stock</th>
+                            <th scope="col" className="px-6 py-3">Stock (Suc. Actual)</th>
                             <th scope="col" className="px-6 py-3">Precio</th>
                             <th scope="col" className="px-6 py-3">Categoría</th>
                             <th scope="col" className="px-6 py-3">Vencimiento</th>
@@ -360,7 +416,8 @@ const Inventory: React.FC = () => {
                     <tbody style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
                         {rowVirtualizer.getVirtualItems().map(virtualItem => {
                             const product = filteredProducts[virtualItem.index];
-                            const isLowStock = product.stock <= product.lowStockAlert;
+                            const stock = getStock(product.id);
+                            const isLowStock = stock > 0 && stock <= product.lowStockAlert;
                             const isExpiring = isProductExpiringSoon(product.expiryDate);
                             const rowClass = isLowStock ? 'bg-red-100 dark:bg-red-900/50' : isExpiring ? 'bg-yellow-100 dark:bg-yellow-900/50' : '';
                             
@@ -378,7 +435,7 @@ const Inventory: React.FC = () => {
                                     <td className="px-6 py-4">{product.sku}</td>
                                     <td className="px-6 py-4">
                                         <div className="flex items-center">
-                                            {product.stock}
+                                            {stock}
                                             {isLowStock && <ExclamationTriangleIcon title="Stock bajo" className="w-5 h-5 text-red-500 ml-2" />}
                                         </div>
                                     </td>

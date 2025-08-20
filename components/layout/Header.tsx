@@ -1,7 +1,8 @@
+
 import React, { useContext, useState, useMemo } from 'react';
 import { AppContext } from '../../App';
 import { BellIcon, UserCircleIcon, ExclamationTriangleIcon, XMarkIcon, Bars3Icon } from '../Icons';
-import { Product } from '../../types';
+import { Product, Branch } from '../../types';
 
 const isProductExpiringSoon = (expiryDate: string | undefined) => {
     if (!expiryDate) return false;
@@ -12,7 +13,7 @@ const isProductExpiringSoon = (expiryDate: string | undefined) => {
     return diffDays <= 30 && diffDays > 0;
 };
 
-const AlertsDropdown: React.FC<{alerts: (Product & { type: 'low-stock' | 'expiry' })[], onDismiss: (alertId: string) => void}> = ({ alerts, onDismiss }) => {
+const AlertsDropdown: React.FC<{alerts: (Product & { type: 'low-stock' | 'expiry', stock: number })[], onDismiss: (alertId: string) => void}> = ({ alerts, onDismiss }) => {
     if (alerts.length === 0) {
         return (
             <div className="absolute right-0 mt-2 w-80 max-w-[90vw] bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4">
@@ -52,25 +53,34 @@ const Header: React.FC<{currentView: string, onMenuClick: () => void}> = ({curre
 
     const alerts = useMemo(() => {
         if (!context) return [];
-        const { products, dismissedAlerts } = context;
+        const { products, dismissedAlerts, inventoryStock, currentBranchId } = context;
+
+        const getStock = (productId: string) => {
+            return inventoryStock.find(s => s.productId === productId && s.branchId === currentBranchId)?.stock || 0;
+        };
 
         const lowStock = products
-            .filter(p => p.stock <= p.lowStockAlert && !dismissedAlerts.includes(`low-stock-${p.id}`))
-            .map(p => ({ ...p, type: 'low-stock' as const }));
+            .filter(p => {
+                const stock = getStock(p.id);
+                return stock > 0 && stock <= p.lowStockAlert && !dismissedAlerts.includes(`low-stock-${p.id}`);
+            })
+            .map(p => ({ ...p, type: 'low-stock' as const, stock: getStock(p.id) }));
 
         const expiring = products
-            .filter(p => isProductExpiringSoon(p.expiryDate) && !dismissedAlerts.includes(`expiry-${p.id}`))
-            .map(p => ({ ...p, type: 'expiry' as const }));
+            .filter(p => isProductExpiringSoon(p.expiryDate) && !dismissedAlerts.includes(`expiry-${p.id}`) && getStock(p.id) > 0)
+            .map(p => ({ ...p, type: 'expiry' as const, stock: getStock(p.id) }));
             
         return [...lowStock, ...expiring];
     }, [context]);
 
     if (!context) return null;
-    const { users, currentUser, setCurrentUser, setDismissedAlerts } = context;
+    const { users, currentUser, setCurrentUser, setDismissedAlerts, branches, currentBranchId, setCurrentBranchId } = context;
     
     const handleDismissAlert = (alertId: string) => {
         setDismissedAlerts(prev => [...prev, alertId]);
     };
+
+    const userCanChangeBranch = currentUser.assignments.length > 1;
 
     return (
         <header className="flex items-center justify-between h-16 px-6 bg-white dark:bg-gray-900 shadow-md flex-shrink-0">
@@ -81,6 +91,22 @@ const Header: React.FC<{currentView: string, onMenuClick: () => void}> = ({curre
                 <h1 className="text-2xl font-semibold text-gray-800 dark:text-white truncate">{currentView}</h1>
             </div>
             <div className="flex items-center gap-4">
+                {userCanChangeBranch && (
+                    <div className="hidden sm:block">
+                        <label htmlFor="branch-selector" className="sr-only">Seleccionar Sucursal</label>
+                        <select
+                            id="branch-selector"
+                            value={currentBranchId}
+                            onChange={(e) => setCurrentBranchId(e.target.value)}
+                            className="text-sm font-medium bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
+                        >
+                            {currentUser.assignments.map(assignment => {
+                                const branch = branches.find(b => b.id === assignment.branchId);
+                                return branch ? <option key={branch.id} value={branch.id}>{branch.name}</option> : null;
+                            })}
+                        </select>
+                    </div>
+                )}
                 <div className="relative">
                     <button onClick={() => setIsAlertsOpen(!isAlertsOpen)} className="relative p-2 text-gray-500 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none">
                         <BellIcon className="w-6 h-6" />
@@ -95,6 +121,7 @@ const Header: React.FC<{currentView: string, onMenuClick: () => void}> = ({curre
                         value={currentUser.id} 
                         onChange={e => setCurrentUser(users.find(u => u.id === e.target.value) || users[0])}
                         className="ml-2 text-sm font-medium bg-transparent border-none dark:bg-gray-900 focus:ring-0 w-24 sm:w-auto sm:max-w-xs truncate"
+                        aria-label="Seleccionar usuario"
                      >
                         {users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
                      </select>

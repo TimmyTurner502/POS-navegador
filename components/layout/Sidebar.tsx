@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { View } from '../../types';
-import { ChartPieIcon, ShoppingCartIcon, ArchiveBoxIcon, DocumentTextIcon, UserGroupIcon, Cog6ToothIcon, UsersIcon, PresentationChartLineIcon, TruckIcon, BanknotesIcon, ShoppingBagIcon, ClipboardDocumentListIcon } from '../Icons';
+import { ChartPieIcon, ShoppingCartIcon, ArchiveBoxIcon, DocumentTextIcon, KycIcon, Cog6ToothIcon, ChartBarSquareIcon, ReceiptOutlineIcon, ShoppingBagIcon, KeyIcon, TruckIcon, BookOpenIcon, UserGroupIcon } from '../Icons';
 import { AppContext } from '../../App';
 
 
@@ -15,20 +15,22 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView }) => {
     const allNavItems = [
         { view: View.DASHBOARD, icon: <ChartPieIcon className="w-6 h-6" />, label: 'Dashboard' },
         { view: View.POS, icon: <ShoppingCartIcon className="w-6 h-6" />, label: 'Punto de Venta' },
+        { view: View.CASH_DRAWER, icon: <KeyIcon className="w-6 h-6" />, label: 'Módulo de Caja' },
         { view: View.INVENTORY, icon: <ArchiveBoxIcon className="w-6 h-6" />, label: 'Inventario' },
         { view: View.SALES, icon: <DocumentTextIcon className="w-6 h-6" />, label: 'Ventas' },
         { view: View.PURCHASES, icon: <ShoppingBagIcon className="w-6 h-6" />, label: 'Compras' },
-        { view: View.CUSTOMERS, icon: <UserGroupIcon className="w-6 h-6" />, label: 'Clientes' },
+        { view: View.CUSTOMERS, icon: <KycIcon className="w-6 h-6" />, label: 'Clientes' },
         { view: View.SUPPLIERS, icon: <TruckIcon className="w-6 h-6" />, label: 'Proveedores' },
-        { view: View.EXPENSES, icon: <BanknotesIcon className="w-6 h-6" />, label: 'Gastos' },
-        { view: View.REPORTS, icon: <PresentationChartLineIcon className="w-6 h-6" />, label: 'Reportes' },
-        { view: View.AUDIT_LOG, icon: <ClipboardDocumentListIcon className="w-6 h-6" />, label: 'Historial' },
-        { view: View.USERS, icon: <UsersIcon className="w-6 h-6" />, label: 'Usuarios' },
+        { view: View.EXPENSES, icon: <ReceiptOutlineIcon className="w-6 h-6" />, label: 'Gastos' },
+        { view: View.REPORTS, icon: <ChartBarSquareIcon className="w-6 h-6" />, label: 'Reportes' },
+        { view: View.AUDIT_LOG, icon: <BookOpenIcon className="w-6 h-6" />, label: 'Historial' },
+        { view: View.USERS, icon: <UserGroupIcon className="w-6 h-6" />, label: 'Usuarios' },
         { view: View.SETTINGS, icon: <Cog6ToothIcon className="w-6 h-6" />, label: 'Configuración' },
     ];
     
     const userPermissions = context?.currentUserRole?.permissions || [];
-    const navItems = allNavItems.filter(item => userPermissions.includes(item.view));
+    const enabledModules = context?.settings.enabledModules || [];
+    const navItems = allNavItems.filter(item => userPermissions.includes(item.view) && enabledModules.includes(item.view));
 
 
     return (

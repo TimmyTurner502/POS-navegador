@@ -1,19 +1,21 @@
 
-
-
-
 import React, { useState, useContext, useMemo } from 'react';
 import { AppContext } from '../../App';
 import { Purchase, PurchaseItem, Product, Supplier } from '../../types';
 import { PlusIcon, TrashIcon, EyeIcon } from '../Icons';
 import { formatCurrency, formatDate } from '../../utils/formatters';
+import toast from 'react-hot-toast';
 
 // Re-using modals from other components to keep it DRY
 import { SupplierFormModal } from '../suppliers/Suppliers';
 import { ProductFormModal } from '../inventory/Inventory';
 
 
-const NewPurchaseModal: React.FC<{ onClose: () => void, onSave: (purchase: Purchase) => void }> = ({ onClose, onSave }) => {
+const NewPurchaseModal: React.FC<{ 
+    onClose: () => void, 
+    onSave: (purchase: Purchase) => void,
+    onSaveProduct: (product: Product, stock: number) => void 
+}> = ({ onClose, onSave, onSaveProduct }) => {
     const context = useContext(AppContext);
     const [supplierId, setSupplierId] = useState<string>('');
     const [items, setItems] = useState<PurchaseItem[]>([]);
@@ -25,7 +27,7 @@ const NewPurchaseModal: React.FC<{ onClose: () => void, onSave: (purchase: Purch
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
 
     if (!context) return null;
-    const { suppliers, setSuppliers, products, setProducts, currentUser, settings, logAction, productCategories, setProductCategories } = context;
+    const { suppliers, setSuppliers, products, currentUser, settings, logAction, productCategories, setProductCategories, currentBranchId } = context;
 
     const filteredProducts = useMemo(() => {
         const itemIds = new Set(items.map(i => i.productId));
@@ -71,21 +73,15 @@ const NewPurchaseModal: React.FC<{ onClose: () => void, onSave: (purchase: Purch
         setIsSupplierModalOpen(false);
     }
     
-    const handleSaveProduct = (product: Product) => {
-        const existing = products.find(p => p.id === product.id);
-        if (existing) {
-             setProducts(products.map(p => p.id === product.id ? product : p));
-        } else {
-             setProducts([...products, product]);
-        }
-         logAction(`Producto guardado: ${product.name}`);
+    const localSaveProductAndCloseModal = (product: Product, stock: number) => {
+        onSaveProduct(product, stock);
         setIsProductModalOpen(false);
-    }
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!supplierId || items.length === 0) {
-            alert("Por favor seleccione un proveedor y agregue al menos un producto.");
+            toast.error("Por favor seleccione un proveedor y agregue al menos un producto.");
             return;
         }
         const supplier = suppliers.find(s => s.id === supplierId);
@@ -100,7 +96,8 @@ const NewPurchaseModal: React.FC<{ onClose: () => void, onSave: (purchase: Purch
             total,
             user: currentUser.name,
             comments,
-            receiptImageUrl
+            receiptImageUrl,
+            branchId: currentBranchId
         };
         onSave(newPurchase);
         onClose();
@@ -109,7 +106,7 @@ const NewPurchaseModal: React.FC<{ onClose: () => void, onSave: (purchase: Purch
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
             {isSupplierModalOpen && <div className="fixed inset-0 z-50"><SupplierFormModal supplier={null} onClose={() => setIsSupplierModalOpen(false)} onSave={handleSaveSupplier} /></div>}
-            {isProductModalOpen && <div className="fixed inset-0 z-50"><ProductFormModal product={null} onClose={() => setIsProductModalOpen(false)} onSave={handleSaveProduct} categories={productCategories} setCategories={setProductCategories} /></div>}
+            {isProductModalOpen && <div className="fixed inset-0 z-50"><ProductFormModal product={null} onClose={() => setIsProductModalOpen(false)} onSave={localSaveProductAndCloseModal} categories={productCategories} setCategories={setProductCategories} /></div>}
 
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-4xl max-h-[90vh] flex flex-col">
                 <h2 className="text-2xl font-bold mb-4">Nueva Compra</h2>
@@ -236,39 +233,69 @@ const Purchases: React.FC = () => {
     const [viewingPurchase, setViewingPurchase] = useState<Purchase | null>(null);
 
     if (!context) return null;
-    const { purchases, setPurchases, setProducts, setSuppliers, logAction, settings } = context;
+    const { purchases, setPurchases, setSuppliers, logAction, settings, inventoryStock, setInventoryStock, products, setProducts, currentBranchId } = context;
 
     const handleSavePurchase = (purchase: Purchase) => {
         setPurchases(prev => [purchase, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
         
-        setProducts(prevProducts => {
-            const newProducts = JSON.parse(JSON.stringify(prevProducts));
+        // Update inventory stock for the correct branch
+        setInventoryStock(prevStock => {
+            const newStock = [...prevStock];
             purchase.items.forEach(item => {
-                const productIndex = newProducts.findIndex((p: Product) => p.id === item.productId);
-                if (productIndex !== -1) {
-                    newProducts[productIndex].stock += item.quantity;
+                const stockIndex = newStock.findIndex(s => s.productId === item.productId && s.branchId === purchase.branchId);
+                if (stockIndex !== -1) {
+                    newStock[stockIndex] = { ...newStock[stockIndex], stock: newStock[stockIndex].stock + item.quantity };
+                } else {
+                    newStock.push({ productId: item.productId, branchId: purchase.branchId, stock: item.quantity });
                 }
             });
-            return newProducts;
+            return newStock;
         });
 
+        // Update supplier balance
         setSuppliers(prevSuppliers => {
             return prevSuppliers.map(s => s.id === purchase.supplierId ? { ...s, currentBalance: s.currentBalance + purchase.total } : s);
         });
 
         logAction(`Compra #${purchase.id} registrada`, { type: 'purchase', id: purchase.id });
+        toast.success("Compra guardada con éxito.");
     };
+
+    const handleSaveProduct = (product: Product, stock: number) => {
+        setProducts(prevProducts => {
+            const isExisting = prevProducts.some(p => p.id === product.id);
+            if (isExisting) {
+                return prevProducts.map(p => p.id === product.id ? product : p);
+            }
+            return [...prevProducts, product];
+        });
+
+        setInventoryStock(prevStock => {
+            const stockIndex = prevStock.findIndex(s => s.productId === product.id && s.branchId === currentBranchId);
+            if (stockIndex > -1) {
+                const newStock = [...prevStock];
+                newStock[stockIndex] = { ...newStock[stockIndex], stock };
+                return newStock;
+            }
+            return [...prevStock, { productId: product.id, branchId: currentBranchId, stock }];
+        });
+
+        logAction(`Producto creado desde Compras: ${product.name}`, { type: 'product', id: product.id });
+        toast.success("Producto guardado.");
+    };
+
 
      const filteredPurchases = useMemo(() => {
         return purchases.filter(p =>
-            p.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            p.supplierName.toLowerCase().includes(searchTerm.toLowerCase())
+            (p.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            p.supplierName.toLowerCase().includes(searchTerm.toLowerCase())) &&
+            p.branchId === currentBranchId
         );
-    }, [purchases, searchTerm]);
+    }, [purchases, searchTerm, currentBranchId]);
 
     return (
         <div className="container mx-auto">
-            {isModalOpen && <NewPurchaseModal onClose={() => setIsModalOpen(false)} onSave={handleSavePurchase} />}
+            {isModalOpen && <NewPurchaseModal onClose={() => setIsModalOpen(false)} onSave={handleSavePurchase} onSaveProduct={handleSaveProduct} />}
             {viewingPurchase && <PurchaseDetailModal purchase={viewingPurchase} onClose={() => setViewingPurchase(null)} />}
 
             <div className="sm:flex sm:justify-between sm:items-center mb-6 gap-4">
@@ -318,7 +345,7 @@ const Purchases: React.FC = () => {
                         ))}
                          {filteredPurchases.length === 0 && (
                             <tr>
-                                <td colSpan={6} className="text-center py-8 text-gray-500">No se encontraron compras.</td>
+                                <td colSpan={6} className="text-center py-8 text-gray-500">No se encontraron compras para esta sucursal.</td>
                             </tr>
                         )}
                     </tbody>
